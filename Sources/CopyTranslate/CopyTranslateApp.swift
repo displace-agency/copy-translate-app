@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Combine
+import ServiceManagement
 
 @main
 struct CopyTranslateApp: App {
@@ -17,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var currentWindow: TranslationWindow?
     private let prefs = Preferences.shared
     private var cancellables = Set<AnyCancellable>()
+
+    private var accessibilityPoll: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -35,11 +38,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installEventTap()
         ensureAccessibilityPermission()
 
+        // Re-install the event tap as soon as the user grants Accessibility,
+        // without requiring a restart. Polling is fine since this is cheap
+        // and only runs while the user is flipping the toggle.
+        accessibilityPoll = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            guard let self, !isAccessibilityGranted() else {
+                self?.accessibilityPoll?.invalidate()
+                self?.accessibilityPoll = nil
+                return
+            }
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in self?.retryEventTapIfNeeded() }
+
         // Re-render icon when paused state changes.
         prefs.$isPaused
             .receive(on: DispatchQueue.main)
             .sink { [weak self] paused in self?.refreshIcon(paused: paused) }
             .store(in: &cancellables)
+    }
+
+    private func retryEventTapIfNeeded() {
+        guard eventTap == nil || !isAccessibilityGranted() else { return }
+        if isAccessibilityGranted() { installEventTap() }
     }
 
     private func installEventTap() {
@@ -55,6 +78,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ]
         AXIsProcessTrustedWithOptions(options)
     }
+}
+
+private func isAccessibilityGranted() -> Bool {
+    AXIsProcessTrusted()
+}
+
+extension AppDelegate {
 
     private func refreshIcon(paused: Bool) {
         statusItem.button?.image = Self.renderBarIcon(
@@ -115,6 +145,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
+        let axGranted = isAccessibilityGranted()
+        let axItem = NSMenuItem(
+            title: axGranted ? "Accessibility: granted" : "Accessibility: MISSING — grant to enable ⌘C detection",
+            action: axGranted ? nil : #selector(openAccessibility), keyEquivalent: ""
+        )
+        axItem.target = self
+        axItem.isEnabled = !axGranted
+        menu.addItem(axItem)
+
         let keyItem = NSMenuItem(
             title: Config.apiKey() == nil ? "API key: missing" : "API key: loaded",
             action: nil, keyEquivalent: ""
@@ -127,6 +166,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(modelItem)
 
         menu.addItem(.separator())
+
+        let launch = NSMenuItem(
+            title: "Launch at login",
+            action: #selector(toggleLaunchAtLogin), keyEquivalent: ""
+        )
+        launch.target = self
+        launch.state = isLaunchAtLoginEnabled() ? .on : .off
+        menu.addItem(launch)
 
         let accessibility = NSMenuItem(
             title: "Open Accessibility Settings…",
@@ -151,6 +198,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openAccessibility() {
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
         NSWorkspace.shared.open(url)
+    }
+
+    // MARK: - Launch at Login
+
+    private func isLaunchAtLoginEnabled() -> Bool {
+        SMAppService.mainApp.status == .enabled
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        let service = SMAppService.mainApp
+        do {
+            if service.status == .enabled {
+                try service.unregister()
+            } else {
+                try service.register()
+            }
+        } catch {
+            NSLog("Launch-at-login toggle failed: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Status icon rendering (macOS 26 safe)
