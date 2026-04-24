@@ -39,13 +39,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ensureAccessibilityPermission()
 
         // Re-install the event tap as soon as the user grants Accessibility,
-        // without requiring a restart. Polling is fine since this is cheap
-        // and only runs while the user is flipping the toggle.
+        // without requiring a restart. The tap cannot be created before the
+        // TCC grant lands, so poll every 2s until we've hooked it once.
         accessibilityPoll = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            guard let self, !isAccessibilityGranted() else {
-                self?.accessibilityPoll?.invalidate()
-                self?.accessibilityPoll = nil
-                return
+            guard let self else { return }
+            self.retryEventTapIfNeeded()
+            if self.eventTap != nil {
+                self.accessibilityPoll?.invalidate()
+                self.accessibilityPoll = nil
             }
         }
         NotificationCenter.default.addObserver(
@@ -61,15 +62,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func retryEventTapIfNeeded() {
-        guard eventTap == nil || !isAccessibilityGranted() else { return }
-        if isAccessibilityGranted() { installEventTap() }
+        guard eventTap == nil, isAccessibilityGranted() else { return }
+        installEventTap()
     }
 
     private func installEventTap() {
-        eventTap = EventTap(window: Config.doubleTapWindow) { [weak self] in
+        let tap = EventTap(window: Config.doubleTapWindow) { [weak self] in
             self?.handleDoubleTap()
         }
-        _ = eventTap.start()
+        if tap.start() {
+            eventTap = tap
+        } else {
+            eventTap = nil
+        }
     }
 
     private func ensureAccessibilityPermission() {
