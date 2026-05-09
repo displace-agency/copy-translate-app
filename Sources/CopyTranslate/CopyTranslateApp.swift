@@ -101,15 +101,20 @@ extension AppDelegate {
     // MARK: - Double-tap -> translate
 
     private func handleDoubleTap() {
-        guard !prefs.isPaused else { return }
+        guard !prefs.isPaused else {
+            NSLog("[CopyTranslate] paused, ignoring double-tap")
+            return
+        }
 
         // Tiny delay lets macOS complete the second ⌘C's copy before we read
         // the pasteboard. 90ms is comfortably fast for the user and reliable.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.09) { [weak self] in
             guard let self else { return }
-            guard let text = NSPasteboard.general.string(forType: .string),
-                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            self.startTranslation(for: text)
+            let raw = NSPasteboard.general.string(forType: .string) ?? ""
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            NSLog("[CopyTranslate] pasteboard len=%d, trimmed len=%d", raw.count, trimmed.count)
+            guard !trimmed.isEmpty else { return }
+            self.startTranslation(for: trimmed)
         }
     }
 

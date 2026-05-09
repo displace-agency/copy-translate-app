@@ -75,9 +75,11 @@ final class EventTap {
 
         let now = CFAbsoluteTimeGetCurrent()
         if now - lastTapAt <= window {
+            NSLog("[CopyTranslate] double-tap ⌘C detected (gap=%.3fs)", now - lastTapAt)
             lastTapAt = 0
             DispatchQueue.main.async { [weak self] in self?.onDoubleTap() }
         } else {
+            NSLog("[CopyTranslate] first ⌘C, waiting ≤%.2fs for second", window)
             lastTapAt = now
         }
     }
