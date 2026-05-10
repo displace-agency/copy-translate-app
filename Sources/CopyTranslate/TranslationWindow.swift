@@ -9,7 +9,7 @@ final class TranslationWindow: NSPanel {
         let size = Config.popupSize
         super.init(
             contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel],
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -29,12 +29,17 @@ final class TranslationWindow: NSPanel {
         let view = TranslationView(state: state, onClose: { [weak self] in self?.close() })
         contentViewController = NSHostingController(rootView: view)
         centerNearMouse()
+        alphaValue = 0
         makeKeyAndOrderFront(nil)
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.15
+            animator().alphaValue = 1
+        }
     }
 
     private func centerNearMouse() {
-        guard let screen = NSScreen.main else { center(); return }
         let mouse = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main else { center(); return }
         let size = frame.size
         var origin = NSPoint(
             x: mouse.x - size.width / 2,
@@ -53,8 +58,25 @@ final class TranslationState: ObservableObject {
     @Published var translation: String = ""
     @Published var isLoading: Bool = true
     @Published var errorMessage: String?
+    @Published var isCached: Bool = false
+    @Published var elapsed: TimeInterval = 0
+    var onRetry: (() -> Void)?
+    private var timer: Timer?
 
-    init(source: String) { self.source = source }
+    init(source: String) {
+        self.source = source
+        let start = Date()
+        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            self?.elapsed = Date().timeIntervalSince(start)
+        }
+    }
+
+    func stopTimer() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    deinit { timer?.invalidate() }
 }
 
 struct TranslationView: View {
@@ -76,23 +98,33 @@ struct TranslationView: View {
                 )
             }
         }
-        .frame(width: Config.popupSize.width, height: Config.popupSize.height)
+        .frame(minWidth: 500, minHeight: 200)
+        .frame(idealWidth: Config.popupSize.width, idealHeight: Config.popupSize.height)
         .background(Color(white: 0.08))
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 8) {
             Text("CopyTranslate")
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundColor(.white.opacity(0.5))
                 .tracking(1.8)
                 .textCase(.uppercase)
+            Text("→ \(Config.targetLanguage)")
+                .font(.system(size: 10, weight: .regular, design: .monospaced))
+                .foregroundColor(.white.opacity(0.3))
             Spacer()
             if let err = state.errorMessage {
                 Text(err)
                     .font(.system(size: 11))
                     .foregroundColor(.red.opacity(0.85))
-                    .lineLimit(1)
+                    .lineLimit(3)
+                if state.onRetry != nil {
+                    Button("Retry") { state.onRetry?() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.blue.opacity(0.85))
+                }
             }
             Button(action: onClose) {
                 Image(systemName: "xmark")
@@ -102,6 +134,10 @@ struct TranslationView: View {
             }
             .buttonStyle(.plain)
             .keyboardShortcut(.escape, modifiers: [])
+            Button("") { onClose() }
+                .keyboardShortcut("w", modifiers: .command)
+                .frame(width: 0, height: 0)
+                .opacity(0)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -115,6 +151,14 @@ struct TranslationView: View {
                     .foregroundColor(.white.opacity(0.4))
                     .tracking(1.2)
                     .textCase(.uppercase)
+                if !isSource && state.isCached {
+                    Text("cached")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundColor(.green.opacity(0.6))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.green.opacity(0.3)))
+                }
                 Spacer()
                 if !isSource && !body.isEmpty {
                     Button(action: { copyToPasteboard(body) }) {
@@ -131,7 +175,7 @@ struct TranslationView: View {
                     HStack(spacing: 6) {
                         ProgressView()
                             .controlSize(.small)
-                        Text("Translating…")
+                        Text("Translating... \(String(format: "%.1fs", state.elapsed))")
                             .font(.system(size: 12))
                             .foregroundColor(.white.opacity(0.4))
                     }
@@ -143,6 +187,12 @@ struct TranslationView: View {
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+            }
+            if isSource {
+                Text("\(body.count) chars")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.2))
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
         .padding(14)

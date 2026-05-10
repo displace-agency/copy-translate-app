@@ -49,15 +49,36 @@ enum Anthropic {
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await session.data(for: req)
-        guard let http = response as? HTTPURLResponse else {
-            throw AnthropicError.malformedResponse
+        var lastError: Error = AnthropicError.malformedResponse
+        for attempt in 0..<3 {
+            if attempt > 0 {
+                try await Task.sleep(nanoseconds: UInt64(attempt) * 1_000_000_000)
+                NSLog("[CopyTranslate] retry attempt %d", attempt)
+            }
+            do {
+                let (data, response) = try await session.data(for: req)
+                guard let http = response as? HTTPURLResponse else {
+                    throw AnthropicError.malformedResponse
+                }
+                if (500..<600).contains(http.statusCode) {
+                    let body = String(data: data, encoding: .utf8) ?? ""
+                    lastError = AnthropicError.httpStatus(http.statusCode, body)
+                    continue
+                }
+                guard (200..<300).contains(http.statusCode) else {
+                    let body = String(data: data, encoding: .utf8) ?? ""
+                    throw AnthropicError.httpStatus(http.statusCode, body)
+                }
+                return try parseResponse(data)
+            } catch let error as URLError where error.code == .timedOut || error.code == .networkConnectionLost {
+                lastError = error
+                continue
+            }
         }
-        guard (200..<300).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw AnthropicError.httpStatus(http.statusCode, body)
-        }
+        throw lastError
+    }
 
+    private static func parseResponse(_ data: Data) throws -> String {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let content = json["content"] as? [[String: Any]],
               let first = content.first,

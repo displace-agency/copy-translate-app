@@ -28,6 +28,8 @@
     <string>MIT License</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>CopyTranslate needs to observe ⌘C key presses to detect double-taps and translate your selection.</string>
 </dict>

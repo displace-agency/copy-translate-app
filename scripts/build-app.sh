@@ -8,10 +8,9 @@ VERSION="${1:-0.1.0}"
 BUILD_ROOT="build"
 APP_DIR="${BUILD_ROOT}/${APP_NAME}.app"
 
-echo "→ Building universal binary (arm64 + x86_64)…"
-swift build -c release --arch arm64 --arch x86_64
-
-BIN_PATH="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/${APP_NAME}"
+echo "→ Building universal binary (arm64 + x86_64)..."
+BIN_DIR="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
+BIN_PATH="${BIN_DIR}/${APP_NAME}"
 if [ ! -f "${BIN_PATH}" ]; then
     BIN_PATH=".build/apple/Products/Release/${APP_NAME}"
 fi
@@ -19,6 +18,7 @@ if [ ! -f "${BIN_PATH}" ]; then
     echo "Could not locate built binary." >&2
     exit 1
 fi
+echo "→ Binary: $(file "${BIN_PATH}" | grep -o 'arm64\|x86_64' | tr '\n' '+' | sed 's/+$//')"
 
 echo "→ Assembling ${APP_DIR}…"
 rm -rf "${APP_DIR}"
