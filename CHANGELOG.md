@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.1] - 2026-06-12
+
+### Fixed
+- **The ⌘C trigger never worked on macOS 13+** because the app requested
+  Accessibility, but a global keyboard event tap actually requires **Input
+  Monitoring**. The app now requests Input Monitoring (`IOHIDRequestAccess`),
+  shows its status in the menu, opens the correct Settings pane, and retries the
+  tap automatically once granted.
+- **Permission re-prompted on every rebuild.** The build was ad-hoc signed, so
+  each build had a new code identity and macOS discarded the grant. Builds are
+  now signed with a stable self-signed certificate (`scripts/make-signing-cert.sh`)
+  whose designated requirement is constant — the grant persists across updates.
+- Guaranteed-fresh release compile in `build-app.sh`; warns if the result is
+  still ad-hoc.
+
+### Note
+If the menu shows "Input Monitoring: MISSING" after granting (leftover grants
+from earlier ad-hoc builds): `tccutil reset ListenEvent agency.displace.CopyTranslate`, then relaunch.
+
 ## [0.3.0] - 2026-06-12
 
 ### Added

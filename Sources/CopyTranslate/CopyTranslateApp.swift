@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import Combine
 import ServiceManagement
+import IOKit.hid
 
 @main
 struct CopyTranslateApp: App {
@@ -18,7 +19,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var currentWindow: TranslationWindow?
     private var translationTask: Task<Void, Never>?
     private var historyWindow: NSWindow?
-    private var firstRunWindow: NSWindow?
     private let prefs = Preferences.shared
     private var cancellables = Set<AnyCancellable>()
 
@@ -41,8 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.action = #selector(showMenu(_:))
         }
 
+        ensureInputMonitoringPermission()
         installEventTap()
-        ensureAccessibilityPermission()
 
         // Re-install the event tap as soon as the user grants Accessibility,
         // without requiring a restart. The tap cannot be created before the
@@ -65,34 +65,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] paused in self?.refreshIcon(paused: paused) }
             .store(in: &cancellables)
-
-        if !UserDefaults.standard.bool(forKey: "hasSeenWelcome") {
-            showFirstRunWindow()
-        }
-    }
-
-    private func showFirstRunWindow() {
-        let view = FirstRunView(onDone: { [weak self] in
-            UserDefaults.standard.set(true, forKey: "hasSeenWelcome")
-            self?.firstRunWindow?.close()
-            self?.firstRunWindow = nil
-        })
-        let controller = NSHostingController(rootView: view)
-        let window = NSWindow(contentViewController: controller)
-        window.styleMask = [.titled, .closable]
-        window.title = "CopyTranslate"
-        window.titlebarAppearsTransparent = true
-        window.isReleasedWhenClosed = false
-        window.level = .floating
-        window.center()
-        firstRunWindow = window
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func retryEventTapIfNeeded() {
-        guard eventTap == nil, isAccessibilityGranted() else { return }
+        // Keep retrying until the tap installs — it succeeds once Input Monitoring
+        // is granted. (Accessibility alone is NOT sufficient on macOS 13+ for a
+        // listen-only keyboard CGEventTap.)
+        guard eventTap == nil else { return }
         installEventTap()
+    }
+
+    private func ensureInputMonitoringPermission() {
+        if IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) != kIOHIDAccessTypeGranted {
+            // Adds the app to the Input Monitoring list and shows the system prompt.
+            IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+        }
+    }
+
+    private func isInputMonitoringGranted() -> Bool {
+        IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
     }
 
     private func installEventTap() {
@@ -246,14 +237,14 @@ extension AppDelegate {
 
         menu.addItem(.separator())
 
-        let axGranted = isAccessibilityGranted()
-        let axItem = NSMenuItem(
-            title: axGranted ? "Accessibility: granted" : "Accessibility: MISSING — grant to enable ⌘C detection",
-            action: axGranted ? nil : #selector(openAccessibility), keyEquivalent: ""
+        let imGranted = isInputMonitoringGranted()
+        let imItem = NSMenuItem(
+            title: imGranted ? "Input Monitoring: granted" : "Input Monitoring: MISSING — grant to enable ⌘C detection",
+            action: imGranted ? nil : #selector(openInputMonitoring), keyEquivalent: ""
         )
-        axItem.target = self
-        axItem.isEnabled = !axGranted
-        menu.addItem(axItem)
+        imItem.target = self
+        imItem.isEnabled = !imGranted
+        menu.addItem(imItem)
 
         let keyItem = NSMenuItem(
             title: Config.apiKey() == nil ? "API key: missing" : "API key: loaded",
@@ -295,12 +286,12 @@ extension AppDelegate {
         launch.state = isLaunchAtLoginEnabled() ? .on : .off
         menu.addItem(launch)
 
-        let accessibility = NSMenuItem(
-            title: "Open Accessibility Settings…",
-            action: #selector(openAccessibility), keyEquivalent: ""
+        let inputMon = NSMenuItem(
+            title: "Open Input Monitoring Settings…",
+            action: #selector(openInputMonitoring), keyEquivalent: ""
         )
-        accessibility.target = self
-        menu.addItem(accessibility)
+        inputMon.target = self
+        menu.addItem(inputMon)
 
         let settings = NSMenuItem(
             title: "Settings…",
@@ -358,6 +349,12 @@ extension AppDelegate {
 
     @objc private func clearHistory() {
         TranslationHistory.shared.clear()
+    }
+
+    @objc private func openInputMonitoring() {
+        ensureInputMonitoringPermission() // (re)prompt and ensure the app is listed
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!
+        NSWorkspace.shared.open(url)
     }
 
     @objc private func openAccessibility() {

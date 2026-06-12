@@ -27,7 +27,7 @@ Download the latest `.dmg` from [Releases](https://github.com/displace-agency/co
 ### From source
 
 1. **Create a stable signing identity (one time).** This makes the app's code
-   signature constant across rebuilds, so macOS keeps your Accessibility grant
+   signature constant across rebuilds, so macOS keeps your Input Monitoring grant
    instead of re-asking on every update:
 
    ```bash
@@ -44,17 +44,30 @@ Download the latest `.dmg` from [Releases](https://github.com/displace-agency/co
    bash scripts/install.sh
    ```
 
-3. On first launch a welcome window walks you through the two one-time steps:
-   - **Grant Accessibility** — required so the app can detect the `Cmd+C`
-     double-tap globally. Thanks to step 1, you grant this **once** and it
-     persists across all future updates.
-   - **Add your Anthropic API key** — paste it (stored in the macOS Keychain).
-     You can also set it later in Settings, or via `ANTHROPIC_API_KEY` in
-     `~/.env.local` (imported into the Keychain on first run).
+3. **Grant Input Monitoring** (one time). The app detects the global `Cmd+C`
+   double-tap with a keyboard event tap, which macOS 13+ gates behind
+   **Input Monitoring** (System Settings → Privacy & Security → **Input
+   Monitoring**) — *not* Accessibility. On first launch the app prompts for it;
+   enable **CopyTranslate** in that list. The menu bar item shows
+   "Input Monitoring: granted" once it's active. Thanks to step 1's stable
+   signature, you grant this **once** and it persists across all future updates.
 
-> Ad-hoc signing (the default `codesign --sign -`) changes the app's identity on
-> every build, which makes macOS forget the Accessibility grant and re-prompt
-> endlessly. The stable cert in step 1 is what prevents that.
+   > **If the menu still says "Input Monitoring: MISSING" after granting** (common
+   > if you previously ran ad-hoc builds — old, mismatched grants pile up), clear
+   > the stale entries and relaunch:
+   > ```bash
+   > tccutil reset ListenEvent agency.displace.CopyTranslate
+   > # then quit and reopen CopyTranslate
+   > ```
+
+4. **Add your Anthropic API key** — in **Settings → API Key**, paste it and Save
+   (stored in the macOS Keychain). You can also use `ANTHROPIC_API_KEY` in
+   `~/.env.local`, which is imported into the Keychain on first run.
+
+> **Why the stable cert matters:** ad-hoc signing (`codesign --sign -`) changes
+> the app's code identity on every build, so macOS treats each build as a new app
+> and forgets the Input Monitoring grant — re-prompting endlessly. The stable
+> self-signed cert from step 1 keeps the identity constant so the grant sticks.
 
 ## Usage
 
@@ -111,11 +124,16 @@ scripts/install.sh
 ## Troubleshooting
 
 **App doesn't respond to double-tap Cmd+C**
-- Check that Accessibility permission is granted in System Settings > Privacy & Security > Accessibility
-- The menu bar icon shows the current status; click it to see diagnostics
+- The menu bar item shows the live status. If it says **"Input Monitoring:
+  MISSING"**, enable CopyTranslate in System Settings → Privacy & Security →
+  **Input Monitoring** (not Accessibility), then **quit and relaunch** the app —
+  the grant only takes effect on the next launch.
+- Still missing after granting? Old ad-hoc builds leave stale grants. Run
+  `tccutil reset ListenEvent agency.displace.CopyTranslate`, then relaunch.
 
 **"API key: missing" in menu**
-- Ensure `~/.env.local` contains `ANTHROPIC_API_KEY=sk-ant-api03-...`
+- Set it in **Settings → API Key**, or ensure `~/.env.local` contains
+  `ANTHROPIC_API_KEY=sk-ant-api03-...`
 - The app reads this file on startup; restart after adding the key
 
 **Menu bar icon invisible (macOS 26)**
