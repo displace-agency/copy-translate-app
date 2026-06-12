@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var currentWindow: TranslationWindow?
     private var translationTask: Task<Void, Never>?
     private var historyWindow: NSWindow?
+    private var firstRunWindow: NSWindow?
     private let prefs = Preferences.shared
     private var cancellables = Set<AnyCancellable>()
 
@@ -64,6 +65,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] paused in self?.refreshIcon(paused: paused) }
             .store(in: &cancellables)
+
+        if !UserDefaults.standard.bool(forKey: "hasSeenWelcome") {
+            showFirstRunWindow()
+        }
+    }
+
+    private func showFirstRunWindow() {
+        let view = FirstRunView(onDone: { [weak self] in
+            UserDefaults.standard.set(true, forKey: "hasSeenWelcome")
+            self?.firstRunWindow?.close()
+            self?.firstRunWindow = nil
+        })
+        let controller = NSHostingController(rootView: view)
+        let window = NSWindow(contentViewController: controller)
+        window.styleMask = [.titled, .closable]
+        window.title = "CopyTranslate"
+        window.titlebarAppearsTransparent = true
+        window.isReleasedWhenClosed = false
+        window.level = .floating
+        window.center()
+        firstRunWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func retryEventTapIfNeeded() {

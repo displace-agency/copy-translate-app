@@ -26,22 +26,35 @@ Download the latest `.dmg` from [Releases](https://github.com/displace-agency/co
 
 ### From source
 
-1. Add your Anthropic API key. Easiest: launch the app and paste it in
-   **Settings → API Key → Save** (stored in your macOS Keychain). Alternatively,
-   put it in `~/.env.local` and the app imports it into the Keychain on first run:
+1. **Create a stable signing identity (one time).** This makes the app's code
+   signature constant across rebuilds, so macOS keeps your Accessibility grant
+   instead of re-asking on every update:
 
+   ```bash
+   bash scripts/make-signing-cert.sh
    ```
-   ANTHROPIC_API_KEY=sk-ant-api03-...
-   ```
+
+   (On the first build after this, if macOS asks whether `codesign` may use the
+   key, click **Always Allow**.)
 
 2. Build and install:
 
    ```bash
-   scripts/build-app.sh 0.2.0
-   scripts/install.sh
+   bash scripts/build-app.sh
+   bash scripts/install.sh
    ```
 
-3. On first launch, macOS prompts for **Accessibility** permission. Grant it so the app can detect the `Cmd+C` double-tap globally.
+3. On first launch a welcome window walks you through the two one-time steps:
+   - **Grant Accessibility** — required so the app can detect the `Cmd+C`
+     double-tap globally. Thanks to step 1, you grant this **once** and it
+     persists across all future updates.
+   - **Add your Anthropic API key** — paste it (stored in the macOS Keychain).
+     You can also set it later in Settings, or via `ANTHROPIC_API_KEY` in
+     `~/.env.local` (imported into the Keychain on first run).
+
+> Ad-hoc signing (the default `codesign --sign -`) changes the app's identity on
+> every build, which makes macOS forget the Accessibility grant and re-prompt
+> endlessly. The stable cert in step 1 is what prevents that.
 
 ## Usage
 
