@@ -1,4 +1,5 @@
 import Foundation
+import CopyTranslateCore
 
 final class TranslationCache {
     static let shared = TranslationCache()
@@ -36,6 +37,6 @@ final class TranslationCache {
     }
 
     private func cacheKey(source: String, targetLanguage: String) -> String {
-        "\(targetLanguage.count):\(targetLanguage)|\(source)"
+        CacheKey.make(language: targetLanguage, source: source)
     }
 }

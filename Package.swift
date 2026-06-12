@@ -10,7 +10,19 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "CopyTranslate",
+            dependencies: ["CopyTranslateCore"],
             path: "Sources/CopyTranslate"
+        ),
+        // Pure, dependency-free logic (env parsing, prompt building, cache keys,
+        // double-tap timing, SSE parsing, language list). Unit-tested.
+        .target(
+            name: "CopyTranslateCore",
+            path: "Sources/CopyTranslateCore"
+        ),
+        .testTarget(
+            name: "CopyTranslateCoreTests",
+            dependencies: ["CopyTranslateCore"],
+            path: "Tests/CopyTranslateCoreTests"
         ),
     ]
 )

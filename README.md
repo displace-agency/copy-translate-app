@@ -26,7 +26,9 @@ Download the latest `.dmg` from [Releases](https://github.com/displace-agency/co
 
 ### From source
 
-1. Add your Anthropic API key to `~/.env.local`:
+1. Add your Anthropic API key. Easiest: launch the app and paste it in
+   **Settings → API Key → Save** (stored in your macOS Keychain). Alternatively,
+   put it in `~/.env.local` and the app imports it into the Keychain on first run:
 
    ```
    ANTHROPIC_API_KEY=sk-ant-api03-...
@@ -60,7 +62,7 @@ Open **Settings** from the menu bar (`Cmd+,`) to configure:
 | Sound on completion | Play a sound when translation finishes | Off |
 | Launch at login | Start CopyTranslate when you log in | Off |
 
-The API key is read from `~/.env.local` (supports `export KEY=value` and `KEY="value"` formats).
+The API key resolves in this order: macOS Keychain → `ANTHROPIC_API_KEY` environment variable → `~/.env.local` (supports `export KEY=value` and `KEY="value"` formats). Manage it in Settings → API Key.
 
 ## Architecture
 

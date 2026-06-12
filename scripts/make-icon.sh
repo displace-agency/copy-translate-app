@@ -3,8 +3,16 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-echo "→ Rendering 1024×1024 master PNG…"
-swift scripts/gen-icon.swift /tmp/copytranslate-icon.png
+# Prefer a hand-authored 1024×1024 master (Resources/icon-master-1024.png),
+# falling back to the procedural Swift generator if it's absent.
+MASTER="/tmp/copytranslate-icon.png"
+if [ -f "Resources/icon-master-1024.png" ]; then
+    echo "→ Using Resources/icon-master-1024.png as master…"
+    cp "Resources/icon-master-1024.png" "$MASTER"
+else
+    echo "→ Rendering 1024×1024 master PNG via gen-icon.swift…"
+    swift scripts/gen-icon.swift "$MASTER"
+fi
 
 STAGE="/tmp/CopyTranslate.iconset"
 rm -rf "${STAGE}"

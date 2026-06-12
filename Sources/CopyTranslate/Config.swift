@@ -1,60 +1,60 @@
 import Foundation
+import CopyTranslateCore
 
-/// Runtime configuration. API key comes from `~/.env.local`, other prefs
-/// are stored in UserDefaults.
+/// Runtime configuration. The API key is resolved from the Keychain first, then
+/// the `ANTHROPIC_API_KEY` environment variable, then `~/.env.local` (kept as a
+/// fallback for power users). Other prefs live in UserDefaults.
 enum Config {
     static let model = "claude-haiku-4-5"
-    static let doubleTapWindow: TimeInterval = 0.4
     static let popupSize = CGSize(width: 820, height: 300)
     static let maxTokens = 1024
 
-    static let supportedLanguages = [
-        "Spanish", "English", "French", "Portuguese", "German", "Italian",
-        "Japanese", "Chinese (Simplified)", "Chinese (Traditional)", "Korean",
-        "Arabic", "Russian", "Dutch", "Swedish", "Polish",
-    ]
+    static let supportedLanguages = Languages.all
 
     static var targetLanguage: String {
-        get { UserDefaults.standard.string(forKey: "targetLanguage") ?? "Spanish" }
+        get { UserDefaults.standard.string(forKey: "targetLanguage") ?? Languages.defaultLanguage }
         set { UserDefaults.standard.set(newValue, forKey: "targetLanguage") }
     }
 
-    static var prompt: String {
-        let lang = targetLanguage
-        return """
-            Translate the following text to \(lang).
-            If the text is already in \(lang), translate it to English instead.
-            Output ONLY the translation - no preamble, no quotes, no notes, no labels.
+    /// Translation instruction for the saved default language.
+    static var prompt: String { PromptBuilder.translationPrompt(target: targetLanguage) }
+    /// Translation instruction for an explicit per-request language.
+    static func prompt(target: String) -> String { PromptBuilder.translationPrompt(target: target) }
 
-            Text:
+    // MARK: - API key
 
-            """
+    /// Resolved key, in precedence order. Reads Keychain first.
+    static func apiKey() -> String? {
+        if let k = Keychain.get() { return k }
+        if let env = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"], !env.isEmpty { return env }
+        if let fileKey = readEnvFileKey() { return fileKey }
+        return nil
     }
 
-    /// Reads ANTHROPIC_API_KEY from ~/.env.local. Supports `export KEY=...`
-    /// and `KEY="..."` quoting styles. Returns nil when not found.
-    static func apiKey() -> String? {
-        if let env = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"],
-           !env.isEmpty { return env }
+    /// Where the active key came from (for the Settings UI).
+    enum KeySource: String { case keychain, environment, envFile, none }
+    static func keySource() -> KeySource {
+        if Keychain.get() != nil { return .keychain }
+        if let env = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"], !env.isEmpty { return .environment }
+        if readEnvFileKey() != nil { return .envFile }
+        return .none
+    }
 
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".env.local")
-        guard let contents = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-
-        for rawLine in contents.split(whereSeparator: \.isNewline) {
-            var line = rawLine.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("export ") { line = String(line.dropFirst("export ".count)) }
-            guard let eq = line.firstIndex(of: "=") else { continue }
-            let key = line[..<eq].trimmingCharacters(in: .whitespaces)
-            if key != "ANTHROPIC_API_KEY" { continue }
-            var value = line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)
-            if (value.hasPrefix("\"") && value.hasSuffix("\"")) ||
-               (value.hasPrefix("'") && value.hasSuffix("'")) {
-                value = String(value.dropFirst().dropLast())
-            }
-            return value.isEmpty ? nil : value
+    /// On first launch, copy a key found only in env/.env.local into the Keychain
+    /// so subsequent reads are local. Logs without ever printing the key value.
+    static func migrateKeyToKeychainIfNeeded() {
+        guard Keychain.get() == nil else { return }
+        if let env = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"], !env.isEmpty {
+            if Keychain.set(env) { NSLog("[CopyTranslate] imported API key from environment into Keychain") }
+        } else if let fileKey = readEnvFileKey() {
+            if Keychain.set(fileKey) { NSLog("[CopyTranslate] imported API key from ~/.env.local into Keychain") }
         }
-        return nil
+    }
+
+    private static func readEnvFileKey() -> String? {
+        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".env.local")
+        guard let contents = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        return EnvParsing.parseAPIKey(fromFileContents: contents)
     }
 }
 
@@ -77,11 +77,18 @@ final class Preferences: ObservableObject {
         didSet { UserDefaults.standard.set(doubleTapSpeed, forKey: "doubleTapSpeed") }
     }
 
+    /// When on, clicking "copy translation" replaces the clipboard; otherwise the
+    /// user's original copied text is left in place.
+    @Published var replaceClipboard: Bool {
+        didSet { UserDefaults.standard.set(replaceClipboard, forKey: "replaceClipboard") }
+    }
+
     private init() {
         self.isPaused = UserDefaults.standard.bool(forKey: "isPaused")
         self.targetLanguage = Config.targetLanguage
         self.soundEnabled = UserDefaults.standard.bool(forKey: "soundEnabled")
         self.doubleTapSpeed = UserDefaults.standard.double(forKey: "doubleTapSpeed").clamped(to: 0.2...0.8, default: 0.4)
+        self.replaceClipboard = UserDefaults.standard.bool(forKey: "replaceClipboard")
     }
 }
 

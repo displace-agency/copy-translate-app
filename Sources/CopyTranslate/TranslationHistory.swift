@@ -20,7 +20,7 @@ final class TranslationHistory: ObservableObject {
     static let shared = TranslationHistory()
 
     @Published private(set) var records: [TranslationRecord] = []
-    private let maxRecords = 50
+    private let maxRecords = 200
     private let fileURL: URL
 
     private init() {
@@ -43,6 +43,20 @@ final class TranslationHistory: ObservableObject {
     func clear() {
         records = []
         save()
+    }
+
+    func delete(_ id: UUID) {
+        records.removeAll { $0.id == id }
+        save()
+    }
+
+    /// Case-insensitive search over source and translation text.
+    func search(_ query: String) -> [TranslationRecord] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return records }
+        return records.filter {
+            $0.source.lowercased().contains(q) || $0.translation.lowercased().contains(q)
+        }
     }
 
     private func save() {

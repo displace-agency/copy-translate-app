@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 APP_NAME="CopyTranslate"
-VERSION="${1:-0.1.0}"
+VERSION="${1:-0.3.0}"
 BUILD_ROOT="build"
 APP_DIR="${BUILD_ROOT}/${APP_NAME}.app"
 

@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var eventTap: EventTap!
     private var currentWindow: TranslationWindow?
     private var translationTask: Task<Void, Never>?
+    private var historyWindow: NSWindow?
     private let prefs = Preferences.shared
     private var cancellables = Set<AnyCancellable>()
 
@@ -24,6 +25,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+
+        // Move a key found only in env/.env.local into the Keychain on first run.
+        Config.migrateKeyToKeychainIfNeeded()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.isVisible = true
@@ -68,7 +72,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func installEventTap() {
-        let tap = EventTap(window: Config.doubleTapWindow) { [weak self] in
+        // Read the window live from preferences so the speed slider takes effect.
+        let tap = EventTap(windowProvider: { Preferences.shared.doubleTapSpeed }) { [weak self] in
             self?.handleDoubleTap()
         }
         if tap.start() {
@@ -134,7 +139,7 @@ extension AppDelegate {
     private func showTranslationError(source: String, message: String) {
         currentWindow?.close()
         let window = TranslationWindow()
-        let state = TranslationState(source: source)
+        let state = TranslationState(source: source, target: Config.targetLanguage)
         state.stopTimer()
         state.errorMessage = message
         state.isLoading = false
@@ -142,17 +147,18 @@ extension AppDelegate {
         currentWindow = window
     }
 
-    private func startTranslation(for text: String) {
+    private func startTranslation(for text: String, target: String = Config.targetLanguage) {
         translationTask?.cancel()
         currentWindow?.close()
         let window = TranslationWindow()
-        let state = TranslationState(source: text)
-        state.onRetry = { [weak self] in self?.startTranslation(for: text) }
+        let state = TranslationState(source: text, target: target)
+        state.onRetry = { [weak self] in self?.startTranslation(for: text, target: target) }
+        state.onChangeLanguage = { [weak self] newTarget in self?.startTranslation(for: text, target: newTarget) }
+        state.onOpenSettings = { [weak self] in self?.openSettings() }
         window.present(state: state)
         currentWindow = window
 
-        let lang = Config.targetLanguage
-        if let cached = TranslationCache.shared.lookup(source: text, targetLanguage: lang) {
+        if let cached = TranslationCache.shared.lookup(source: text, targetLanguage: target) {
             state.translation = cached
             state.isLoading = false
             state.isCached = true
@@ -160,26 +166,43 @@ extension AppDelegate {
             return
         }
 
-        translationTask = Task {
+        translationTask = Task { [weak self] in
+            var accumulated = ""
             do {
-                let result = try await Anthropic.translate(text)
+                try await Anthropic.streamTranslate(text, target: target) { delta in
+                    accumulated += delta
+                    let snapshot = accumulated
+                    // main queue is FIFO, so snapshots apply in order (no flicker).
+                    DispatchQueue.main.async {
+                        if state.isLoading { state.isLoading = false }
+                        state.translation = snapshot
+                    }
+                }
                 guard !Task.isCancelled else { return }
-                TranslationCache.shared.store(source: text, targetLanguage: lang, translation: result)
+                let final = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
+                TranslationCache.shared.store(source: text, targetLanguage: target, translation: final)
                 await MainActor.run {
-                    TranslationHistory.shared.add(source: text, translation: result, targetLanguage: lang)
+                    TranslationHistory.shared.add(source: text, translation: final, targetLanguage: target)
                     state.stopTimer()
-                    state.translation = result
+                    state.translation = final
                     state.isLoading = false
-                    if self.prefs.soundEnabled {
-                        NSSound(named: "Pop")?.play()
+                    if self?.prefs.soundEnabled == true { NSSound(named: "Pop")?.play() }
+                    if self?.prefs.replaceClipboard == true, !final.isEmpty {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(final, forType: .string)
                     }
                 }
             } catch {
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     state.stopTimer()
-                    state.errorMessage = error.localizedDescription
                     state.isLoading = false
+                    if let e = error as? AnthropicError {
+                        state.errorMessage = e.errorDescription
+                        state.showSettingsAction = e.isKeyProblem
+                    } else {
+                        state.errorMessage = error.localizedDescription
+                    }
                 }
             }
         }
@@ -232,22 +255,9 @@ extension AppDelegate {
         langItem.submenu = langMenu
         menu.addItem(langItem)
 
-        let history = TranslationHistory.shared.records
-        if !history.isEmpty {
-            let histMenu = NSMenu()
-            for record in history.prefix(5) {
-                let preview = record.source.prefix(30) + (record.source.count > 30 ? "..." : "")
-                let item = NSMenuItem(title: "\(preview) → \(record.targetLanguage)", action: #selector(copyHistoryItem(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = record.translation
-                histMenu.addItem(item)
-            }
-            histMenu.addItem(.separator())
-            let clearItem = NSMenuItem(title: "Clear History", action: #selector(clearHistory), keyEquivalent: "")
-            clearItem.target = self
-            histMenu.addItem(clearItem)
-            let histItem = NSMenuItem(title: "Recent Translations", action: nil, keyEquivalent: "")
-            histItem.submenu = histMenu
+        if !TranslationHistory.shared.records.isEmpty {
+            let histItem = NSMenuItem(title: "History…", action: #selector(showHistoryWindow), keyEquivalent: "y")
+            histItem.target = self
             menu.addItem(histItem)
         }
 
@@ -287,6 +297,30 @@ extension AppDelegate {
     }
 
     @objc private func togglePause() { prefs.isPaused.toggle() }
+
+    @objc private func showHistoryWindow() {
+        historyWindow?.close()
+        let view = HistoryView(
+            onReopen: { [weak self] record in
+                self?.historyWindow?.close()
+                self?.startTranslation(for: record.source, target: record.targetLanguage)
+            },
+            onClose: { [weak self] in self?.historyWindow?.close() }
+        )
+        let controller = NSHostingController(rootView: view)
+        let window = NSWindow(contentViewController: controller)
+        window.setContentSize(NSSize(width: 460, height: 480))
+        window.styleMask = [.titled, .closable, .resizable, .fullSizeContentView]
+        window.title = "Translation History"
+        window.titlebarAppearsTransparent = true
+        window.backgroundColor = CT.Palette.bgNS
+        window.isReleasedWhenClosed = false
+        window.level = .floating
+        window.center()
+        historyWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
 
     @objc private func selectLanguage(_ sender: NSMenuItem) {
         prefs.targetLanguage = sender.title

@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.3.0] - 2026-06-12
+
+### Added
+- **Streaming translations** — results appear live token-by-token instead of after the full response
+- **API key in the Keychain** with in-app entry (Settings → API Key: paste, Save, Clear, Test). Key resolves Keychain → `ANTHROPIC_API_KEY` env → `~/.env.local`, and is auto-imported into the Keychain on first launch
+- **Searchable history window** (⌘Y) — search, re-open, copy, or delete past translations; retention raised to 200
+- **On-the-fly target language** — switch the language from the result window header to re-translate without changing your default
+- **Friendly errors** — invalid key / offline / service errors show a clear message (with a Settings shortcut for key problems) instead of a raw HTTP body
+- "Replace clipboard with translation" preference
+- `CopyTranslateCore` library with unit tests (env parsing, prompt building, cache keys, double-tap timing, SSE parsing)
+- New app icon (A ↔ 文 translation motif)
+
+### Fixed
+- **Double-tap speed slider is now actually wired to the event tap** — previously it was saved but ignored
+- Result-window styling unified behind a design-token system
+
+### Changed
+- Single streaming request replaces the previous non-streaming call + retry loop
+- QR-free; menu "Recent Translations" submenu replaced by the History window
+
 ## [0.2.0] - 2026-05-09
 
 ### Added

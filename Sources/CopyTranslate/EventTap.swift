@@ -1,4 +1,5 @@
 import AppKit
+import CopyTranslateCore
 
 /// Global ⌘C double-tap detector. Uses a CGEventTap so it works in any app
 /// that has a selection. Requires Accessibility permission in System
@@ -9,11 +10,13 @@ final class EventTap {
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var lastTapAt: TimeInterval = 0
-    private let window: TimeInterval
+    /// Read live on each tap so the Settings "double-tap speed" slider takes
+    /// effect immediately, without reinstalling the tap.
+    private let windowProvider: () -> TimeInterval
     private let onDoubleTap: Handler
 
-    init(window: TimeInterval, onDoubleTap: @escaping Handler) {
-        self.window = window
+    init(windowProvider: @escaping () -> TimeInterval, onDoubleTap: @escaping Handler) {
+        self.windowProvider = windowProvider
         self.onDoubleTap = onDoubleTap
     }
 
@@ -74,13 +77,10 @@ final class EventTap {
         }
 
         let now = CFAbsoluteTimeGetCurrent()
-        if now - lastTapAt <= window {
-            NSLog("[CopyTranslate] double-tap ⌘C detected (gap=%.3fs)", now - lastTapAt)
-            lastTapAt = 0
+        let (isDouble, newLast) = DoubleTap.evaluate(now: now, last: lastTapAt, window: windowProvider())
+        lastTapAt = newLast
+        if isDouble {
             DispatchQueue.main.async { [weak self] in self?.onDoubleTap() }
-        } else {
-            NSLog("[CopyTranslate] first ⌘C, waiting ≤%.2fs for second", window)
-            lastTapAt = now
         }
     }
 }
